@@ -18,6 +18,18 @@ Ymir is a small native macOS menu-bar app for controlling a local `copilot-api` 
 Ymir builds as a standard macOS app from an Xcode project generated out of
 [`project.yml`](project.yml) with [XcodeGen](https://github.com/yonaskolb/XcodeGen).
 
+### Quick start (fresh clone)
+
+```sh
+cd ~/Developer/Ymir
+make bootstrap   # installs prerequisites and generates Ymir.xcodeproj
+make release     # builds, installs to /Applications, and launches Ymir
+```
+
+`make bootstrap` runs [`scripts/setup.sh`](scripts/setup.sh): it verifies Xcode,
+installs XcodeGen via Homebrew if missing, and regenerates the Xcode project. Run
+`make help` to see all targets.
+
 ### Install / update the standalone app
 
 ```sh
