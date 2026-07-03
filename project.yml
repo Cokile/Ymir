@@ -1,0 +1,26 @@
+name: Ymir
+options:
+  bundleIdPrefix: local.cokile
+  deploymentTarget:
+    macOS: "13.0"
+  createIntermediateGroups: true
+
+settings:
+  base:
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    SWIFT_VERSION: "5.0"
+
+targets:
+  Ymir:
+    type: application
+    platform: macOS
+    sources:
+      - path: Sources/Ymir
+    settings:
+      base:
+        PRODUCT_NAME: Ymir
+        PRODUCT_BUNDLE_IDENTIFIER: local.cokile.Ymir
+        INFOPLIST_FILE: Info.plist
+        GENERATE_INFOPLIST_FILE: NO
+        CODE_SIGN_STYLE: Automatic

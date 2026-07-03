@@ -1,0 +1,12 @@
+# macOS
+.DS_Store
+
+# Swift Package Manager build artifacts
+/.build/
+
+# Build outputs: Xcode DerivedData, bundled .app, generated icon assets
+/build/
+
+# Xcode user-specific state
+**/xcuserdata/
+**/*.xcuserstate
