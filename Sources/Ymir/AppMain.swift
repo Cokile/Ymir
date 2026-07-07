@@ -13,6 +13,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     private let signInMenuItem = NSMenuItem(title: "Sign In", action: #selector(authLogin), keyEquivalent: "")
     private let startMenuItem = NSMenuItem(title: "Start", action: #selector(startGateway), keyEquivalent: "")
     private let stopMenuItem = NSMenuItem(title: "Stop ", action: #selector(stopGateway), keyEquivalent: "")
+    private let restartMenuItem = NSMenuItem(title: "Restart", action: #selector(restartGateway), keyEquivalent: "")
     private let launchAtLoginMenuItem = NSMenuItem(title: "Start at Login", action: #selector(toggleLaunchAtLogin), keyEquivalent: "")
     private let usageViewerMenuItem = NSMenuItem(title: "Open Usage Viewer", action: #selector(openUsageViewer), keyEquivalent: "")
 
@@ -76,6 +77,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         signInMenuItem.target = self
         startMenuItem.target = self
         stopMenuItem.target = self
+        restartMenuItem.target = self
         launchAtLoginMenuItem.target = self
         usageViewerMenuItem.target = self
 
@@ -85,8 +87,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         menu.addItem(NSMenuItem.separator())
         menu.addItem(startMenuItem)
         menu.addItem(stopMenuItem)
+        menu.addItem(restartMenuItem)
         menu.addItem(NSMenuItem.separator())
         menu.addItem(usageViewerMenuItem)
+        menu.addItem(NSMenuItem(title: "Open copilot-api Config", action: #selector(openCopilotAPIConfig), keyEquivalent: "", target: self))
         menu.addItem(NSMenuItem(title: "Open Codex Config", action: #selector(openCodexConfig), keyEquivalent: "", target: self))
         menu.addItem(NSMenuItem(title: "Open Claude Settings", action: #selector(openClaudeSettings), keyEquivalent: "", target: self))
         menu.addItem(NSMenuItem.separator())
@@ -110,6 +114,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         refreshStatus()
     }
 
+    @objc private func restartGateway() {
+        manager.requestRestart()
+        notify(title: "Ymir", body: "copilot-api is restarting.")
+        refreshStatus()
+    }
+
     @objc private func authLogin() {
         do {
             try manager.authLogin()
@@ -121,6 +131,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 
     @objc private func openUsageViewer() {
         NSWorkspace.shared.open(URL(string: "http://localhost:4141/usage-viewer?endpoint=http://localhost:4141/usage")!)
+    }
+
+    @objc private func openCopilotAPIConfig() {
+        NSWorkspace.shared.open(URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(".local/share/copilot-api/config.json"))
     }
 
     @objc private func openCodexConfig() {
@@ -169,6 +183,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                 self.statusItem.button?.toolTip = isRunning ? "Ymir - copilot-api running" : "Ymir - copilot-api stopped"
                 self.startMenuItem.isEnabled = !isRunning && !shouldRun
                 self.stopMenuItem.isEnabled = isRunning || shouldRun
+                self.restartMenuItem.isEnabled = isRunning || shouldRun
                 self.usageViewerMenuItem.isEnabled = isRunning
                 self.updateSignInState()
                 if let message = self.manager.supervise(isRunning: isRunning) {
@@ -225,6 +240,11 @@ private final class CopilotAPIManager {
     private var lastKnownRunning = false
     private var didReportGiveUp = false
     private let maxRestartAttempts = 5
+    /// When true, a Restart is in progress and spawning is blocked until port
+    /// 4141 is released by the previous gateway.
+    private var awaitingRestart = false
+    /// After this instant, force-kill a gateway that ignored SIGTERM during a restart.
+    private var restartKillDeadline = Date.distantPast
 
     /// User intent: start (and keep) the gateway running. Actual spawning is
     /// done by `supervise(isRunning:)` once a status poll confirms the port is
@@ -234,6 +254,7 @@ private final class CopilotAPIManager {
         restartAttempts = 0
         nextRestartAt = .distantPast
         didReportGiveUp = false
+        awaitingRestart = false
     }
 
     /// User intent: stop the gateway and stop auto-restarting it.
@@ -242,6 +263,7 @@ private final class CopilotAPIManager {
         restartAttempts = 0
         nextRestartAt = .distantPast
         didReportGiveUp = false
+        awaitingRestart = false
         if process?.isRunning == true {
             process?.terminate()
         }
@@ -251,10 +273,44 @@ private final class CopilotAPIManager {
         terminateExistingGateway()
     }
 
+    /// User intent: restart the gateway. Stops the current instance immediately,
+    /// then defers spawning to `supervise(isRunning:)` until port 4141 is free,
+    /// so the new process doesn't fail to bind an already-held port.
+    func requestRestart() {
+        shouldBeRunning = true
+        restartAttempts = 0
+        nextRestartAt = .distantPast
+        didReportGiveUp = false
+        awaitingRestart = true
+        restartKillDeadline = Date().addingTimeInterval(8)
+        if process?.isRunning == true {
+            process?.terminate()
+        }
+        process = nil
+        terminateExistingGateway()
+    }
+
     /// Called on the main thread each status-poll tick. Handles auto-restart
     /// with exponential backoff and returns a user-facing message when it acts.
     func supervise(isRunning: Bool) -> String? {
         defer { lastKnownRunning = isRunning }
+
+        // Deterministic restart: after Restart we stopped the old gateway and
+        // must wait until port 4141 is released before spawning, or the new
+        // process fails to bind. Force-kill the old one if it ignores SIGTERM
+        // past the deadline.
+        if awaitingRestart {
+            if isRunning || isPortBusy() {
+                if Date() >= restartKillDeadline {
+                    terminateExistingGateway(force: true)
+                }
+                return nil
+            }
+            awaitingRestart = false
+            // The restart was already announced; avoid a misleading
+            // "stopped unexpectedly" message when we spawn below.
+            lastKnownRunning = false
+        }
 
         if isRunning {
             restartAttempts = 0
@@ -378,12 +434,32 @@ private final class CopilotAPIManager {
         return directory.appendingPathComponent("copilot-api.log")
     }
 
-    private func terminateExistingGateway() {
+    private func terminateExistingGateway(force: Bool = false) {
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
-        proc.arguments = ["-f", "@jeffreycao/copilot-api.*start"]
+        proc.arguments = (force ? ["-9"] : []) + ["-f", "@jeffreycao/copilot-api.*start"]
         try? proc.run()
         proc.waitUntilExit()
+    }
+
+    /// Whether something is still listening on the gateway port. Used to gate a
+    /// restart until the previous process has fully released the socket.
+    private func isPortBusy() -> Bool {
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
+        proc.arguments = ["-nP", "-iTCP:4141", "-sTCP:LISTEN", "-t"]
+        let pipe = Pipe()
+        proc.standardOutput = pipe
+        proc.standardError = FileHandle.nullDevice
+        do {
+            try proc.run()
+        } catch {
+            // Can't check; assume free so a restart never deadlocks.
+            return false
+        }
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        proc.waitUntilExit()
+        return !data.isEmpty
     }
 }
 
