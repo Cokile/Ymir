@@ -98,7 +98,7 @@ final class CopilotAPIManager {
         if restartAttempts >= maxRestartAttempts {
             if !didReportGiveUp {
                 didReportGiveUp = true
-                return "copilot-api failed to stay up after \(maxRestartAttempts) attempts. Click Start to retry."
+                return "Gateway failed to stay up after \(maxRestartAttempts) attempts. Click Start to retry."
             }
             return nil
         }
@@ -113,11 +113,11 @@ final class CopilotAPIManager {
         do {
             try spawn()
         } catch {
-            return "copilot-api restart failed: \(error.localizedDescription)"
+            return "Gateway restart failed: \(error.localizedDescription)"
         }
         // Only announce unexpected restarts; the initial Start is announced by
         // the menu action itself.
-        return wasRunning ? "copilot-api stopped unexpectedly; restarting…" : nil
+        return wasRunning ? "Gateway stopped unexpectedly; restarting…" : nil
     }
 
     private func spawn() throws {
@@ -148,7 +148,7 @@ final class CopilotAPIManager {
         let script = """
         #!/bin/bash
         export PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin:$PATH"
-        echo "Ymir: signing in to copilot-api…"
+        echo "Ymir: signing in to gateway…"
         echo
         npx @jeffreycao/copilot-api@latest auth login --provider copilot
         code=$?

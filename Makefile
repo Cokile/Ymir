@@ -14,7 +14,7 @@ bootstrap: ## Install prerequisites and generate the Xcode project
 generate: ## Regenerate Ymir.xcodeproj from project.yml
 	@xcodegen generate
 
-release: ## Build the Release app, install to /Applications, and launch it
+release: generate ## Build the Release app, install to /Applications, and launch it
 	@scripts/release_app.sh
 
 clean: ## Remove build artifacts

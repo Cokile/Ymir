@@ -17,6 +17,7 @@ targets:
     platform: macOS
     sources:
       - path: Sources/Ymir
+      - path: Resources/Ymir.icns
     settings:
       base:
         PRODUCT_NAME: Ymir

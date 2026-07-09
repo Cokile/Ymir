@@ -61,11 +61,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
     }
 
     private func configureStatusItem() {
-        statusItem.length = NSStatusItem.variableLength
+        statusItem.length = NSStatusItem.squareLength
         statusItem.isVisible = true
-        statusItem.button?.image = nil
-        statusItem.button?.attributedTitle = NSAttributedString(string: "Ymir", attributes: [.foregroundColor: NSColor.white])
-        statusItem.button?.toolTip = "Ymir - copilot-api"
+        statusItem.button?.image = Self.menuBarIcon()
+        statusItem.button?.imagePosition = .imageOnly
+        statusItem.button?.imageScaling = .scaleProportionallyDown
+        statusItem.button?.attributedTitle = NSAttributedString()
+        statusItem.button?.toolTip = "Ymir - gateway"
         statusItem.menu = menu
         NSLog("Ymir status item configured")
     }
@@ -75,18 +77,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         image.lockFocus()
 
         NSColor.black.setStroke()
-        let circle = NSBezierPath(ovalIn: NSRect(x: 1.5, y: 1.5, width: 15, height: 15))
-        circle.lineWidth = 1.8
-        circle.stroke()
-
         let mark = NSBezierPath()
-        mark.lineWidth = 2.2
+        mark.lineWidth = 2.8
         mark.lineCapStyle = .round
         mark.lineJoinStyle = .round
-        mark.move(to: NSPoint(x: 5, y: 12.5))
-        mark.line(to: NSPoint(x: 9, y: 8.5))
-        mark.line(to: NSPoint(x: 13, y: 12.5))
-        mark.move(to: NSPoint(x: 9, y: 8.5))
+        mark.move(to: NSPoint(x: 4.5, y: 13.2))
+        mark.line(to: NSPoint(x: 9, y: 8.4))
+        mark.line(to: NSPoint(x: 13.5, y: 13.2))
+        mark.move(to: NSPoint(x: 9, y: 8.4))
         mark.line(to: NSPoint(x: 9, y: 4.2))
         mark.stroke()
 
@@ -135,26 +133,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
 
     @objc private func startGateway() {
         manager.requestStart()
-        notify(title: "Ymir", body: "copilot-api is starting.")
+        notify(title: "Ymir", body: "gateway is starting.")
         refreshStatus()
     }
 
     @objc private func stopGateway() {
         manager.requestStop()
-        notify(title: "Ymir", body: "copilot-api stopped.")
+        notify(title: "Ymir", body: "gateway stopped.")
         refreshStatus()
     }
 
     @objc private func restartGateway() {
         manager.requestRestart()
-        notify(title: "Ymir", body: "copilot-api is restarting.")
+        notify(title: "Ymir", body: "gateway is restarting.")
         refreshStatus()
     }
 
     @objc private func authLogin() {
         do {
             try manager.authLogin()
-            notify(title: "Ymir", body: "Opening copilot-api sign-in in Terminal.")
+            notify(title: "Ymir", body: "Opening gateway sign-in in Terminal.")
         } catch {
             notify(title: "Ymir could not start sign-in", body: error.localizedDescription)
         }
@@ -204,11 +202,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
                     statusText = "Gateway: Stopped"
                 }
                 self.statusMenuItem.title = statusText
-                self.statusItem.length = NSStatusItem.variableLength
                 self.statusItem.isVisible = true
-                self.statusItem.button?.image = nil
-                self.statusItem.button?.attributedTitle = NSAttributedString(string: "Ymir", attributes: [.foregroundColor: NSColor.white])
-                self.statusItem.button?.toolTip = isRunning ? "Ymir - copilot-api running" : "Ymir - copilot-api stopped"
+                self.statusItem.button?.toolTip = isRunning ? "Ymir - gateway running" : "Ymir - gateway stopped"
                 let isStarting = shouldRun && !isRunning
                 self.startMenuItem.isEnabled = !isRunning && !shouldRun
                 self.stopMenuItem.isEnabled = isRunning && !isStarting

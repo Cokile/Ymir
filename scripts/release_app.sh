@@ -65,6 +65,12 @@ fi
 # Locally built apps aren't quarantined, but strip the flag just in case.
 xattr -dr com.apple.quarantine "$DEST_APP" >/dev/null 2>&1 || true
 
+# Finder and Launch Services can cache app icons by bundle identity. Refresh the
+# installed bundle metadata so /Applications notices icon-only updates.
+touch "$DEST_APP"
+/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister \
+  -f -R -trusted "$DEST_APP" >/dev/null 2>&1 || true
+
 echo "==> Launching $APP_NAME..."
 open "$DEST_APP"
 
