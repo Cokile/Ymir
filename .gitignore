@@ -7,6 +7,9 @@
 # Build outputs: Xcode DerivedData, bundled .app, generated icon assets
 /build/
 
+# Generated Xcode project
+/Ymir.xcodeproj/
+
 # Xcode user-specific state
 **/xcuserdata/
 **/*.xcuserstate
