@@ -2,6 +2,20 @@ import AppKit
 import Foundation
 
 final class CopilotAPIManager {
+    struct GatewayModel: Decodable {
+        let id: String
+        let displayName: String?
+
+        private enum CodingKeys: String, CodingKey {
+            case id
+            case displayName = "display_name"
+        }
+    }
+
+    private struct ModelsResponse: Decodable {
+        let data: [GatewayModel]
+    }
+
     private var process: Process?
     private let endpoint = URL(string: "http://localhost:4141/v1/models")!
 
@@ -171,6 +185,30 @@ final class CopilotAPIManager {
         request.timeoutInterval = 2
         URLSession.shared.dataTask(with: request) { _, response, _ in
             completion((response as? HTTPURLResponse)?.statusCode == 200)
+        }.resume()
+    }
+
+    func fetchModels(_ completion: @escaping (Result<[GatewayModel], Error>) -> Void) {
+        var request = URLRequest(url: endpoint)
+        request.timeoutInterval = 3
+        URLSession.shared.dataTask(with: request) { data, response, error in
+            if let error {
+                completion(.failure(error))
+                return
+            }
+            guard let response = response as? HTTPURLResponse,
+                  response.statusCode == 200,
+                  let data else {
+                completion(.failure(URLError(.badServerResponse)))
+                return
+            }
+            do {
+                let models = try JSONDecoder().decode(ModelsResponse.self, from: data).data
+                    .sorted { $0.id.localizedCaseInsensitiveCompare($1.id) == .orderedAscending }
+                completion(.success(models))
+            } catch {
+                completion(.failure(error))
+            }
         }.resume()
     }
 

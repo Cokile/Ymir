@@ -15,6 +15,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
     private let stopMenuItem = NSMenuItem(title: "Stop Gateway", action: #selector(stopGateway), keyEquivalent: ".")
     private let restartMenuItem = NSMenuItem(title: "Restart Gateway", action: #selector(restartGateway), keyEquivalent: "r")
     private let launchAtLoginMenuItem = NSMenuItem(title: "Launch at Login", action: #selector(toggleLaunchAtLogin), keyEquivalent: "")
+    private let modelsMenu = NSMenu(title: "Available Models")
+    private lazy var modelsSubmenuItem: NSMenuItem = {
+        let item = NSMenuItem(title: "Available Models", action: nil, keyEquivalent: "")
+        item.submenu = modelsMenu
+        return item
+    }()
+    private var isLoadingModels = false
     private struct AgentSettings {
         let title: String
         let relativePath: String
@@ -115,6 +122,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         menu.addItem(restartMenuItem)
         menu.addItem(NSMenuItem.separator())
         menu.addItem(usageViewerMenuItem)
+        menu.addItem(modelsSubmenuItem)
         menu.addItem(NSMenuItem(title: "Gateway Settings", action: #selector(openCopilotAPIConfig), keyEquivalent: ",", target: self))
         menu.addItem(agentSettingsSubmenuItem)
         menu.addItem(NSMenuItem.separator())
@@ -125,10 +133,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         updateLaunchAtLoginState()
         updateSignInState()
         updateConfigMenuItemVisibility()
+        updateModelsAvailability(isRunning: false)
     }
 
     func menuWillOpen(_ menu: NSMenu) {
         updateConfigMenuItemVisibility()
+        refreshModels()
     }
 
     @objc private func startGateway() {
@@ -160,6 +170,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
 
     @objc private func openUsageViewer() {
         NSWorkspace.shared.open(URL(string: "http://localhost:4141/usage-viewer?endpoint=http://localhost:4141/usage")!)
+    }
+
+    @objc private func copyModelID(_ sender: NSMenuItem) {
+        guard let modelID = sender.representedObject as? String else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(modelID, forType: .string)
     }
 
     @objc private func openCopilotAPIConfig() {
@@ -209,12 +225,61 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
                 self.stopMenuItem.isEnabled = isRunning && !isStarting
                 self.restartMenuItem.isEnabled = isRunning && !isStarting
                 self.usageViewerMenuItem.isEnabled = isRunning
+                self.updateModelsAvailability(isRunning: isRunning)
                 self.updateSignInState()
                 if let message = self.manager.supervise(isRunning: isRunning) {
                     self.notify(title: "Ymir", body: message)
                 }
             }
         }
+    }
+
+    private func refreshModels() {
+        guard modelsSubmenuItem.isEnabled, !isLoadingModels else { return }
+        isLoadingModels = true
+        setModelsMenuMessage("Loading...")
+        manager.fetchModels { [weak self] result in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.isLoadingModels = false
+                switch result {
+                case .success(let models):
+                    self.modelsSubmenuItem.title = "Available Models (\(models.count))"
+                    self.modelsMenu.removeAllItems()
+                    if models.isEmpty {
+                        self.setModelsMenuMessage("No models available")
+                        return
+                    }
+                    for model in models {
+                        let displayName = model.displayName?.trimmingCharacters(in: .whitespacesAndNewlines)
+                        let title = displayName.flatMap { $0.isEmpty || $0 == model.id ? nil : "\($0) (\(model.id))" } ?? model.id
+                        let item = NSMenuItem(title: title, action: #selector(self.copyModelID), keyEquivalent: "")
+                        item.representedObject = model.id
+                        item.target = self
+                        item.toolTip = "Copy \(model.id)"
+                        self.modelsMenu.addItem(item)
+                    }
+                case .failure:
+                    self.modelsSubmenuItem.title = "Available Models"
+                    self.setModelsMenuMessage("Could not load models")
+                }
+            }
+        }
+    }
+
+    private func updateModelsAvailability(isRunning: Bool) {
+        modelsSubmenuItem.isEnabled = isRunning
+        if !isRunning {
+            modelsSubmenuItem.title = "Available Models"
+            setModelsMenuMessage("Gateway is not running")
+        }
+    }
+
+    private func setModelsMenuMessage(_ message: String) {
+        modelsMenu.removeAllItems()
+        let item = NSMenuItem(title: message, action: nil, keyEquivalent: "")
+        item.isEnabled = false
+        modelsMenu.addItem(item)
     }
 
     private func updateLaunchAtLoginState() {
