@@ -15,6 +15,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
     private let stopMenuItem = NSMenuItem(title: "Stop Gateway", action: #selector(stopGateway), keyEquivalent: ".")
     private let restartMenuItem = NSMenuItem(title: "Restart Gateway", action: #selector(restartGateway), keyEquivalent: "r")
     private let launchAtLoginMenuItem = NSMenuItem(title: "Launch at Login", action: #selector(toggleLaunchAtLogin), keyEquivalent: "")
+    private let startAtLaunchMenuItem = NSMenuItem(title: "Start at Launch", action: #selector(toggleStartAtLaunch), keyEquivalent: "")
     private let modelsMenu = NSMenu(title: "Available Models")
     private lazy var modelsSubmenuItem: NSMenuItem = {
         let item = NSMenuItem(title: "Available Models", action: nil, keyEquivalent: "")
@@ -22,6 +23,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         return item
     }()
     private var isLoadingModels = false
+    private static let startAtLaunchDefaultsKey = "startAtLaunch"
+    private static let gatewayAutoStartDelay: TimeInterval = 2
     private struct AgentSettings {
         let title: String
         let relativePath: String
@@ -56,6 +59,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
 
         configureStatusItem()
         configureMenu()
+        if UserDefaults.standard.bool(forKey: Self.startAtLaunchDefaultsKey) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + Self.gatewayAutoStartDelay) { [weak self] in
+                guard UserDefaults.standard.bool(forKey: Self.startAtLaunchDefaultsKey) else { return }
+                self?.manager.requestStart()
+                self?.refreshStatus()
+            }
+        }
         refreshStatus()
         statusTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
             self?.refreshStatus()
@@ -110,6 +120,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         stopMenuItem.target = self
         restartMenuItem.target = self
         launchAtLoginMenuItem.target = self
+        startAtLaunchMenuItem.target = self
         usageViewerMenuItem.target = self
         agentSettingsMenuItems.forEach { $0.target = self }
 
@@ -127,10 +138,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         menu.addItem(agentSettingsSubmenuItem)
         menu.addItem(NSMenuItem.separator())
         menu.addItem(launchAtLoginMenuItem)
+        menu.addItem(startAtLaunchMenuItem)
         menu.addItem(NSMenuItem.separator())
         menu.addItem(NSMenuItem(title: "Quit", action: #selector(quit), keyEquivalent: "q", target: self))
 
         updateLaunchAtLoginState()
+        updateStartAtLaunchState()
         updateSignInState()
         updateConfigMenuItemVisibility()
         updateModelsAvailability(isRunning: false)
@@ -198,6 +211,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         } catch {
             notify(title: "Ymir launch at login failed", body: error.localizedDescription)
         }
+    }
+
+    @objc private func toggleStartAtLaunch() {
+        let defaults = UserDefaults.standard
+        defaults.set(!defaults.bool(forKey: Self.startAtLaunchDefaultsKey), forKey: Self.startAtLaunchDefaultsKey)
+        updateStartAtLaunchState()
     }
 
     @objc private func quit() {
@@ -284,6 +303,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
 
     private func updateLaunchAtLoginState() {
         launchAtLoginMenuItem.state = SMAppService.mainApp.status == .enabled ? .on : .off
+    }
+
+    private func updateStartAtLaunchState() {
+        startAtLaunchMenuItem.state = UserDefaults.standard.bool(forKey: Self.startAtLaunchDefaultsKey) ? .on : .off
     }
 
     private func updateSignInState() {
