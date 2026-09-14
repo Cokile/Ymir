@@ -8,7 +8,6 @@ Ymir is a small native macOS menu-bar app for controlling a local `copilot-api` 
 - Sign in to `copilot-api` (runs `auth login --provider copilot` in a Terminal window)
 - Show running/stopped state in the menu bar
 - Browse every model advertised by the gateway and copy model IDs
-- Open the `copilot-api` usage viewer
 - Open local Codex and Claude Code config files
 - Optional launch at login via macOS `SMAppService`
 - Optional automatic gateway startup when Ymir launches

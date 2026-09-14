@@ -35,7 +35,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         AgentSettings(title: "Claude Code Settings", relativePath: ".claude/settings.json")
     ]
 
-    private let usageViewerMenuItem = NSMenuItem(title: "View Usage", action: #selector(openUsageViewer), keyEquivalent: "u")
     private lazy var agentSettingsMenuItems: [NSMenuItem] = Self.agentSettings.map { settings in
         let item = NSMenuItem(title: settings.title, action: #selector(openAgentSettings), keyEquivalent: "")
         item.representedObject = settings.relativePath
@@ -114,14 +113,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         menu.delegate = self
         menu.autoenablesItems = false
         statusMenuItem.isEnabled = false
-        usageViewerMenuItem.isEnabled = false
         signInMenuItem.target = self
         startMenuItem.target = self
         stopMenuItem.target = self
         restartMenuItem.target = self
         launchAtLoginMenuItem.target = self
         startAtLaunchMenuItem.target = self
-        usageViewerMenuItem.target = self
         agentSettingsMenuItems.forEach { $0.target = self }
 
         menu.addItem(statusMenuItem)
@@ -132,7 +129,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         menu.addItem(stopMenuItem)
         menu.addItem(restartMenuItem)
         menu.addItem(NSMenuItem.separator())
-        menu.addItem(usageViewerMenuItem)
         menu.addItem(modelsSubmenuItem)
         menu.addItem(NSMenuItem(title: "Gateway Settings", action: #selector(openCopilotAPIConfig), keyEquivalent: ",", target: self))
         menu.addItem(agentSettingsSubmenuItem)
@@ -179,10 +175,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         } catch {
             notify(title: "Ymir could not start sign-in", body: error.localizedDescription)
         }
-    }
-
-    @objc private func openUsageViewer() {
-        NSWorkspace.shared.open(URL(string: "http://localhost:4141/usage-viewer?endpoint=http://localhost:4141/usage")!)
     }
 
     @objc private func copyModelID(_ sender: NSMenuItem) {
@@ -243,7 +235,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
                 self.startMenuItem.isEnabled = !isRunning && !shouldRun
                 self.stopMenuItem.isEnabled = isRunning && !isStarting
                 self.restartMenuItem.isEnabled = isRunning && !isStarting
-                self.usageViewerMenuItem.isEnabled = isRunning
                 self.updateModelsAvailability(isRunning: isRunning)
                 self.updateSignInState()
                 if let message = self.manager.supervise(isRunning: isRunning) {
