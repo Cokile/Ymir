@@ -13,6 +13,7 @@ Ymir is a small native macOS menu-bar app for controlling a local `copilot-api` 
 - Optional automatic gateway startup when Ymir launches
 - Local notifications for start/stop/failure events
 - Logs at `~/Library/Logs/Ymir/copilot-api.log`
+- Correct Codex context accounting for GPT-6-Astra through Copilot Responses
 
 ## Build
 
@@ -61,6 +62,7 @@ ad-hoc ("Sign to Run Locally"); pick a Team under Signing & Capabilities, or set
 - Xcode 15+ (or the Swift toolchain / command line tools)
 - [XcodeGen](https://github.com/yonaskolb/XcodeGen) to regenerate the project (`brew install xcodegen`)
 - `npx` available from `/opt/homebrew/bin`, `/usr/local/bin`, or `/usr/bin`
+- Node.js 22.15+ (or 23.5+) for the gateway compatibility module
 - `copilot-api` auth completed once — use the app's **Sign In to copilot-api** menu item, or run:
 
 ```sh
@@ -68,5 +70,22 @@ npx @jeffreycao/copilot-api@latest auth login --provider copilot
 ```
 
 ## Notes
+
+Ymir preloads a small compatibility module when launching the gateway. Copilot's
+GPT-6-Astra Responses usage includes retained reasoning, but its response lacks
+the `x-reasoning-included` capability header that Codex expects. Without that
+header, Codex adds an estimate of older reasoning again and may compact early.
+The module adds the header only to that model's native Copilot Responses route.
+It leaves usage values and Codex's compaction limits unchanged, works with HTTP
+and WebSocket upstream transport, and does not edit the npm cache. The loader
+checks the handler shape and reports an error if a future proxy release changes
+it, rather than applying an unverified rewrite.
+
+Codex 0.155.0-alpha.9.2 also resets this capability before its check at the start
+of a new user turn. That check runs before any gateway response, so it can still
+compact early even with this fix. Removing that remaining behavior requires a
+Codex client change; Ymir's adapter fixes the accounting during a running turn.
+
+Run the compatibility tests with `node --test Tests/codex-usage-compat.test.mjs`.
 
 Ymir is a normal local native app bundle, not Electron. If your company profile blocks all unsigned or ad-hoc signed apps, build and run from Xcode or sign with an Apple Developer certificate trusted by your device management policy.

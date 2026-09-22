@@ -12,7 +12,8 @@ let package = Package(
     targets: [
         .executableTarget(
             name: "Ymir",
-            path: "Sources/Ymir"
+            path: "Sources/Ymir",
+            resources: [.copy("Resources/codex-usage-compat.mjs")]
         )
     ]
 )

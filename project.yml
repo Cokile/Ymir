@@ -17,6 +17,10 @@ targets:
     platform: macOS
     sources:
       - path: Sources/Ymir
+        excludes:
+          - Resources
+      - path: Sources/Ymir/Resources/codex-usage-compat.mjs
+        buildPhase: resources
       - path: Resources/Ymir.icns
     settings:
       base:

@@ -140,7 +140,22 @@ final class CopilotAPIManager {
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: "/usr/bin/env")
         proc.arguments = ["npx", "@jeffreycao/copilot-api@latest", "start"]
-        proc.environment = environment()
+        #if SWIFT_PACKAGE
+        let resourceBundle = Bundle.module
+        #else
+        let resourceBundle = Bundle.main
+        #endif
+        guard let compatibilityModule = resourceBundle.url(forResource: "codex-usage-compat", withExtension: "mjs") else {
+            throw NSError(domain: "Ymir", code: 1, userInfo: [
+                NSLocalizedDescriptionKey: "The gateway compatibility module is missing. Reinstall Ymir."
+            ])
+        }
+        var gatewayEnvironment = environment()
+        let existingNodeOptions = gatewayEnvironment["NODE_OPTIONS"] ?? ""
+        gatewayEnvironment["NODE_OPTIONS"] = [existingNodeOptions, "--import=\(compatibilityModule.absoluteString)"]
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+        proc.environment = gatewayEnvironment
 
         let logURL = logFileURL()
         FileManager.default.createFile(atPath: logURL.path, contents: nil)
