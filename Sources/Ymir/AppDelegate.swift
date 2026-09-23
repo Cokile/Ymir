@@ -32,7 +32,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
 
     private static let agentSettings: [AgentSettings] = [
         AgentSettings(title: "Codex Settings", relativePath: ".codex/config.toml"),
-        AgentSettings(title: "Claude Code Settings", relativePath: ".claude/settings.json")
+        AgentSettings(title: "Claude Code Settings", relativePath: ".claude/settings.json"),
+        AgentSettings(title: "Raycast AI Settings", relativePath: ".config/raycast/ai/providers.yaml")
     ]
 
     private lazy var agentSettingsMenuItems: [NSMenuItem] = Self.agentSettings.map { settings in

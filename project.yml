@@ -21,6 +21,8 @@ targets:
           - Resources
       - path: Sources/Ymir/Resources/codex-usage-compat.mjs
         buildPhase: resources
+      - path: Sources/Ymir/Resources/raycast-compat.mjs
+        buildPhase: resources
       - path: Resources/Ymir.icns
     settings:
       base:

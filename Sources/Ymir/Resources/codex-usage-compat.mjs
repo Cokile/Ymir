@@ -2,6 +2,20 @@ import { registerHooks } from 'node:module';
 
 const marker = '// Ymir: Copilot Astra usage already includes retained reasoning.';
 const nativeResponsesCall = 'const response = await responsesHandlerDependencies.createResponses(payload, {';
+const raycastMarker = '// Ymir: Raycast Chat Completions compatibility route.';
+const chatRoute = 'server.route("/v1/chat/completions", completionRoutes);';
+
+export function adaptRaycastRoutes(source) {
+  if (source.includes(raycastMarker)) return source;
+  if (source.split(chatRoute).length !== 2) {
+    throw new Error('Ymir could not add Raycast support: the copilot-api server routes changed.');
+  }
+  const adapterURL = new URL('./raycast-compat.mjs', import.meta.url).href;
+  return `import { handleRaycastRequest as ymirRaycast } from ${JSON.stringify(adapterURL)};\n` + source.replace(chatRoute, `${chatRoute}
+  ${raycastMarker}
+  server.post("/raycast/v1/chat/completions", c => ymirRaycast(c.req.raw, request => server.fetch(request)));
+  server.get("/raycast/v1/models", c => ymirRaycast(c.req.raw, request => server.fetch(request)));`);
+}
 
 export function adaptCopilotResponses(source) {
   if (source.includes(marker)) return source;
@@ -30,6 +44,6 @@ registerHooks({
     const source = typeof result.source === 'string'
       ? result.source
       : new TextDecoder().decode(result.source);
-    return { ...result, source: adaptCopilotResponses(source) };
+    return { ...result, source: adaptRaycastRoutes(adaptCopilotResponses(source)) };
   },
 });

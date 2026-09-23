@@ -14,6 +14,7 @@ Ymir is a small native macOS menu-bar app for controlling a local `copilot-api` 
 - Local notifications for start/stop/failure events
 - Logs at `~/Library/Logs/Ymir/copilot-api.log`
 - Correct Codex context accounting for GPT-6-Astra through Copilot Responses
+- Use gateway chat models in Raycast AI, including models that require Responses
 
 ## Build
 
@@ -70,6 +71,39 @@ npx @jeffreycao/copilot-api@latest auth login --provider copilot
 ```
 
 ## Notes
+
+### Raycast AI
+
+Raycast Pro supports custom OpenAI-compatible providers. With the updated Ymir
+gateway running, generate Raycast's provider configuration:
+
+```sh
+node scripts/configure_raycast.mjs
+```
+
+This writes `~/.config/raycast/ai/providers.yaml` with the gateway's current chat
+models, their context limits, and supported abilities. Raycast reloads it
+automatically. Select a model under **Ymir** in Raycast's model picker, or set
+defaults in **Settings → AI → Models & Providers**. Keep Ymir's gateway running
+while using these models. Requests use the gateway's existing Copilot account.
+No Copilot token needs to be copied into Raycast.
+
+Run the command again to refresh the model list. The generated file uses JSON,
+which is valid YAML. Subsequent runs preserve other providers in JSON-formatted
+configurations and back up the previous file. If you already have a non-JSON
+YAML configuration, pass a separate output path and merge the `ymir` provider
+into your existing `providers` list; the script refuses to overwrite it.
+
+The local base URL is `http://127.0.0.1:4141/raycast/v1`. The Raycast route forwards
+Chat Completions models directly and translates Responses-only models through
+the gateway's `/v1/responses` endpoint. It handles text, images, function tools,
+streamed output, usage, and cancellation. Embedding models are excluded. Existing
+Codex and Claude Code routes are unchanged. The gateway loader checks the route
+boundary and fails explicitly if a future gateway version changes it.
+
+Run all compatibility tests with `node --test Tests/*.test.mjs`.
+
+### Codex usage accounting
 
 Ymir preloads a small compatibility module when launching the gateway. Copilot's
 GPT-6-Astra Responses usage includes retained reasoning, but its response lacks

@@ -13,7 +13,7 @@ let package = Package(
         .executableTarget(
             name: "Ymir",
             path: "Sources/Ymir",
-            resources: [.copy("Resources/codex-usage-compat.mjs")]
+            resources: [.copy("Resources/codex-usage-compat.mjs"), .copy("Resources/raycast-compat.mjs")]
         )
     ]
 )
