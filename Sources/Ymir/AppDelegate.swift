@@ -9,6 +9,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
     private let menu = NSMenu()
     private let manager = CopilotAPIManager()
     private let account = CopilotAccount()
+    private var statusIcon: GatewayStatusIcon?
+    private var statusRefreshID = UUID()
     private var statusTimer: Timer?
     private var gatewayAutoStartWorkItem: DispatchWorkItem?
 
@@ -89,34 +91,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
     private func configureStatusItem() {
         statusItem.length = NSStatusItem.squareLength
         statusItem.isVisible = true
-        statusItem.button?.image = Self.menuBarIcon()
         statusItem.button?.imagePosition = .imageOnly
         statusItem.button?.imageScaling = .scaleProportionallyDown
         statusItem.button?.attributedTitle = NSAttributedString()
-        statusItem.button?.toolTip = "Ymir - gateway"
+        if let button = statusItem.button {
+            statusIcon = GatewayStatusIcon(button: button)
+        }
         statusItem.menu = menu
         NSLog("Ymir status item configured")
-    }
-
-    private static func menuBarIcon() -> NSImage {
-        let image = NSImage(size: NSSize(width: 18, height: 18))
-        image.lockFocus()
-
-        NSColor.black.setStroke()
-        let mark = NSBezierPath()
-        mark.lineWidth = 2.8
-        mark.lineCapStyle = .round
-        mark.lineJoinStyle = .round
-        mark.move(to: NSPoint(x: 4.5, y: 13.2))
-        mark.line(to: NSPoint(x: 9, y: 8.4))
-        mark.line(to: NSPoint(x: 13.5, y: 13.2))
-        mark.move(to: NSPoint(x: 9, y: 8.4))
-        mark.line(to: NSPoint(x: 9, y: 4.2))
-        mark.stroke()
-
-        image.unlockFocus()
-        image.isTemplate = true
-        return image
     }
 
     private func configureMenu() {
@@ -252,32 +234,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
     }
 
     private func refreshStatus() {
+        let refreshID = UUID()
+        statusRefreshID = refreshID
+        updateGatewayState()
+        updateSignInState()
         manager.checkStatus { [weak self] isRunning in
             DispatchQueue.main.async {
-                guard let self else { return }
-                let shouldRun = self.manager.shouldBeRunning
-                let statusText: String
-                if isRunning {
-                    statusText = "Gateway: Running on :4141"
-                } else if shouldRun {
-                    statusText = "Gateway: Starting…"
-                } else {
-                    statusText = "Gateway: Stopped"
-                }
-                self.statusMenuItem.title = statusText
-                self.statusItem.isVisible = true
-                self.statusItem.button?.toolTip = isRunning ? "Ymir - gateway running" : "Ymir - gateway stopped"
-                let isStarting = shouldRun && !isRunning
-                self.startMenuItem.isEnabled = !isRunning && !shouldRun
-                self.stopMenuItem.isEnabled = isRunning && !isStarting
-                self.restartMenuItem.isEnabled = isRunning && !isStarting
-                self.updateModelsAvailability(isRunning: isRunning)
-                self.updateSignInState()
+                guard let self, self.statusRefreshID == refreshID else { return }
                 if let message = self.manager.supervise(isRunning: isRunning) {
                     self.notify(title: "Ymir", body: message)
                 }
+                self.updateGatewayState()
             }
         }
+    }
+
+    private func updateGatewayState() {
+        let state = manager.state
+        statusMenuItem.title = state.menuTitle
+        statusIcon?.update(state)
+        startMenuItem.isEnabled = state == .stopped
+        stopMenuItem.isEnabled = state != .stopped
+        restartMenuItem.isEnabled = state == .running
+        updateModelsAvailability(isRunning: state == .running)
     }
 
     private func refreshModels() {

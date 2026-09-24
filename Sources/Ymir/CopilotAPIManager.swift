@@ -26,12 +26,20 @@ final class CopilotAPIManager {
     private var nextRestartAt = Date.distantPast
     private var lastKnownRunning = false
     private var didReportGiveUp = false
-    private let maxRestartAttempts = 5
+    private let maxRestartAttempts: Int
     /// When true, a Restart is in progress and spawning is blocked until port
     /// 4141 is released by the previous gateway.
     private var awaitingRestart = false
     /// After this instant, force-kill a gateway that ignored SIGTERM during a restart.
     private var restartKillDeadline = Date.distantPast
+
+    init(maxRestartAttempts: Int = 5) {
+        self.maxRestartAttempts = maxRestartAttempts
+    }
+
+    var state: GatewayState {
+        GatewayState(isRunning: lastKnownRunning, shouldBeRunning: shouldBeRunning, isRestarting: awaitingRestart)
+    }
 
     /// User intent: start (and keep) the gateway running. Actual spawning is
     /// done by `supervise(isRunning:)` once a status poll confirms the port is
@@ -47,6 +55,7 @@ final class CopilotAPIManager {
     /// User intent: stop the gateway and stop auto-restarting it.
     func requestStop() {
         shouldBeRunning = false
+        lastKnownRunning = false
         restartAttempts = 0
         nextRestartAt = .distantPast
         didReportGiveUp = false
@@ -111,6 +120,7 @@ final class CopilotAPIManager {
 
         // Give up after too many failures; let the user retry via Start.
         if restartAttempts >= maxRestartAttempts {
+            shouldBeRunning = false
             if !didReportGiveUp {
                 didReportGiveUp = true
                 return "Gateway failed to stay up after \(maxRestartAttempts) attempts. Click Start to retry."
