@@ -17,6 +17,7 @@ final class CopilotAPIManager {
     }
 
     private var process: Process?
+    private let tokenStore = CopilotTokenStore()
     private let endpoint = URL(string: "http://localhost:4141/v1/models")!
 
     /// Whether the user wants the gateway running (drives auto-restart).
@@ -195,6 +196,13 @@ final class CopilotAPIManager {
         NSWorkspace.shared.open(url)
     }
 
+    func authLogout() throws {
+        // Stop supervision and the gateway before removing the saved token,
+        // since a running gateway also holds credentials in memory.
+        requestStop()
+        try tokenStore.removeToken()
+    }
+
     func checkStatus(_ completion: @escaping (Bool) -> Void) {
         var request = URLRequest(url: endpoint)
         request.timeoutInterval = 2
@@ -225,16 +233,6 @@ final class CopilotAPIManager {
                 completion(.failure(error))
             }
         }.resume()
-    }
-
-    func isSignedIn() -> Bool {
-        // copilot-api stores the GitHub token here after `auth login`.
-        let tokenURL = URL(fileURLWithPath: NSHomeDirectory())
-            .appendingPathComponent(".local/share/copilot-api/github_token")
-        guard let size = try? FileManager.default.attributesOfItem(atPath: tokenURL.path)[.size] as? Int else {
-            return false
-        }
-        return size > 0
     }
 
     private func environment() -> [String: String] {

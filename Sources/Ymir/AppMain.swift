@@ -1,6 +1,7 @@
 import AppKit
 
 @main
+@MainActor
 enum AppMain {
     static let appDelegate = AppDelegate()
 

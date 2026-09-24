@@ -14,6 +14,11 @@ let package = Package(
             name: "Ymir",
             path: "Sources/Ymir",
             resources: [.copy("Resources/codex-usage-compat.mjs"), .copy("Resources/raycast-compat.mjs")]
+        ),
+        .testTarget(
+            name: "YmirTests",
+            dependencies: ["Ymir"],
+            path: "Tests/YmirTests"
         )
     ]
 )

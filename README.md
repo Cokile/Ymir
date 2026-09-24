@@ -6,6 +6,8 @@ Ymir is a small native macOS menu-bar app for controlling a local `copilot-api` 
 
 - Start and stop `npx @jeffreycao/copilot-api@latest start`
 - Sign in to `copilot-api` (runs `auth login --provider copilot` in a Terminal window)
+- Show the signed-in GitHub username in the sign-in entry
+- Sign out of Copilot after confirmation, stopping the gateway and removing only its saved Copilot token (settings and other providers' credentials are kept)
 - Show running/stopped state in the menu bar
 - Browse every model advertised by the gateway and copy model IDs
 - Open local Codex and Claude Code config files
@@ -69,6 +71,17 @@ ad-hoc ("Sign to Run Locally"); pick a Team under Signing & Capabilities, or set
 ```sh
 npx @jeffreycao/copilot-api@latest auth login --provider copilot
 ```
+
+To sign out, choose **Sign Out of Copilot…** in Ymir's menu. This clears the
+local token at `~/.local/share/copilot-api/github_token`; it does not revoke the
+GitHub authorization or sign you out of other apps. Sign in and start the
+gateway again when you want to reconnect.
+
+The account name is looked up using the saved Copilot token and cached in memory
+until that token changes. If GitHub is unavailable, the menu keeps sign-out
+available and retries the lookup later.
+
+Run the local authentication tests with `swift test`.
 
 ## Notes
 

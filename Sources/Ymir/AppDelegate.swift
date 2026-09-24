@@ -3,14 +3,18 @@ import Foundation
 import ServiceManagement
 import UserNotifications
 
+@MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotificationCenterDelegate {
     private lazy var statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private let menu = NSMenu()
     private let manager = CopilotAPIManager()
+    private let account = CopilotAccount()
     private var statusTimer: Timer?
+    private var gatewayAutoStartWorkItem: DispatchWorkItem?
 
     private let statusMenuItem = NSMenuItem(title: "Gateway: Checking…", action: nil, keyEquivalent: "")
     private let signInMenuItem = NSMenuItem(title: "Sign In to Copilot", action: #selector(authLogin), keyEquivalent: "")
+    private let signOutMenuItem = NSMenuItem(title: "Sign Out of Copilot…", action: #selector(authLogout), keyEquivalent: "")
     private let startMenuItem = NSMenuItem(title: "Start Gateway", action: #selector(startGateway), keyEquivalent: "s")
     private let stopMenuItem = NSMenuItem(title: "Stop Gateway", action: #selector(stopGateway), keyEquivalent: ".")
     private let restartMenuItem = NSMenuItem(title: "Restart Gateway", action: #selector(restartGateway), keyEquivalent: "r")
@@ -60,19 +64,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         configureStatusItem()
         configureMenu()
         if UserDefaults.standard.bool(forKey: Self.startAtLaunchDefaultsKey) {
-            DispatchQueue.main.asyncAfter(deadline: .now() + Self.gatewayAutoStartDelay) { [weak self] in
+            let workItem = DispatchWorkItem { [weak self] in
                 guard UserDefaults.standard.bool(forKey: Self.startAtLaunchDefaultsKey) else { return }
                 self?.manager.requestStart()
                 self?.refreshStatus()
             }
+            gatewayAutoStartWorkItem = workItem
+            DispatchQueue.main.asyncAfter(deadline: .now() + Self.gatewayAutoStartDelay, execute: workItem)
         }
         refreshStatus()
-        statusTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
-            self?.refreshStatus()
+        let timer = Timer(timeInterval: 5, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.refreshStatus() }
         }
+        statusTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        gatewayAutoStartWorkItem?.cancel()
         statusTimer?.invalidate()
         manager.requestStop()
     }
@@ -115,6 +124,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         menu.autoenablesItems = false
         statusMenuItem.isEnabled = false
         signInMenuItem.target = self
+        signOutMenuItem.target = self
         startMenuItem.target = self
         stopMenuItem.target = self
         restartMenuItem.target = self
@@ -125,6 +135,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         menu.addItem(statusMenuItem)
         menu.addItem(NSMenuItem.separator())
         menu.addItem(signInMenuItem)
+        menu.addItem(signOutMenuItem)
         menu.addItem(NSMenuItem.separator())
         menu.addItem(startMenuItem)
         menu.addItem(stopMenuItem)
@@ -141,12 +152,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
 
         updateLaunchAtLoginState()
         updateStartAtLaunchState()
+        account.onChange = { [weak self] in self?.applySignInState() }
         updateSignInState()
         updateConfigMenuItemVisibility()
         updateModelsAvailability(isRunning: false)
     }
 
     func menuWillOpen(_ menu: NSMenu) {
+        updateSignInState()
         updateConfigMenuItemVisibility()
         refreshModels()
     }
@@ -176,6 +189,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         } catch {
             notify(title: "Ymir could not start sign-in", body: error.localizedDescription)
         }
+    }
+
+    @objc private func authLogout() {
+        let alert = NSAlert()
+        alert.messageText = "Sign Out of Copilot?"
+        alert.informativeText = "This will stop the gateway and remove its saved Copilot token. Apps using this gateway will lose access until you sign in and start it again. Your settings will be kept."
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Sign Out")
+        alert.addButton(withTitle: "Cancel")
+        NSApp.activate(ignoringOtherApps: true)
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+
+        gatewayAutoStartWorkItem?.cancel()
+        gatewayAutoStartWorkItem = nil
+        do {
+            try manager.authLogout()
+            notify(title: "Ymir", body: "Signed out of Copilot.")
+        } catch {
+            notify(title: "Ymir could not sign out", body: error.localizedDescription)
+        }
+        updateSignInState()
+        refreshStatus()
     }
 
     @objc private func copyModelID(_ sender: NSMenuItem) {
@@ -302,9 +337,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
     }
 
     private func updateSignInState() {
-        let signedIn = manager.isSignedIn()
-        signInMenuItem.title = signedIn ? "Copilot Signed In" : "Sign In to Copilot"
-        signInMenuItem.isEnabled = !signedIn
+        account.refresh()
+        applySignInState()
+    }
+
+    private func applySignInState() {
+        signInMenuItem.title = account.menuTitle
+        signInMenuItem.isEnabled = !account.isSignedIn
+        signOutMenuItem.isEnabled = account.isSignedIn
     }
 
     private func updateConfigMenuItemVisibility() {
@@ -322,28 +362,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         agentSettingsSubmenuItem.isHidden = !hasVisibleAgentSettings
     }
 
-    private func notify(title: String, body: String) {
-        let content = UNMutableNotificationContent()
-        content.title = title
-        content.body = body
-        content.sound = .default
-        let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
-        let center = UNUserNotificationCenter.current()
-        center.getNotificationSettings { settings in
+    nonisolated private func notify(title: String, body: String) {
+        UNUserNotificationCenter.current().getNotificationSettings { settings in
             switch settings.authorizationStatus {
             case .notDetermined:
-                center.requestAuthorization(options: [.alert, .sound]) { granted, _ in
-                    if granted { center.add(request) }
+                UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { granted, _ in
+                    if granted { Self.deliverNotification(title: title, body: body) }
                 }
             case .authorized, .provisional:
-                center.add(request)
+                Self.deliverNotification(title: title, body: body)
             default:
                 NSLog("Ymir: notifications not authorized (status \(settings.authorizationStatus.rawValue)); enable in System Settings > Notifications > Ymir")
             }
         }
     }
 
-    func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification, withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
+    nonisolated private static func deliverNotification(title: String, body: String) {
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body = body
+        content.sound = .default
+        let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
+        UNUserNotificationCenter.current().add(request)
+    }
+
+    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification, withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
         completionHandler([.banner, .list, .sound])
     }
 }
