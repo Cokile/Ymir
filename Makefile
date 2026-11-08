@@ -2,7 +2,7 @@
 # See README.md for details. Scripts live in scripts/.
 
 .DEFAULT_GOAL := help
-.PHONY: help bootstrap generate release clean
+.PHONY: help bootstrap generate check-gateway release clean
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -13,6 +13,9 @@ bootstrap: ## Install prerequisites and generate the Xcode project
 
 generate: ## Regenerate Ymir.xcodeproj from project.yml
 	@xcodegen generate
+
+check-gateway: ## Verify compatibility with the pinned npm gateway bundle
+	@node scripts/check_gateway.mjs
 
 release: generate ## Build the Release app, install to /Applications, and launch it
 	@scripts/release_app.sh

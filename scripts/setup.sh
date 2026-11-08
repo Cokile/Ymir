@@ -43,13 +43,14 @@ echo "==> XcodeGen: $(xcodegen --version)"
 echo "==> Generating Ymir.xcodeproj from project.yml..."
 xcodegen generate
 
-# npx isn't needed to build, but the app shells out to `npx @jeffreycao/copilot-api`.
+# Warm the same pinned npx package used by the app.
 if command -v npm >/dev/null 2>&1; then
   echo "==> npx: $(command -v npx)"
-  # Install copilot-api up front. This also warms the shared npm cache that the
-  # app's `npx @jeffreycao/copilot-api@latest start` reuses, so first start is fast.
-  echo "==> Installing copilot-api (@jeffreycao/copilot-api@latest)..."
-  npm install -g @jeffreycao/copilot-api@latest
+  GATEWAY_VERSION="$(cat Sources/Ymir/Resources/copilot-api-version.txt)"
+  [[ "$GATEWAY_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail "Invalid pinned gateway version."
+  GATEWAY_PACKAGE="@jeffreycao/copilot-api@$GATEWAY_VERSION"
+  echo "==> Preparing $GATEWAY_PACKAGE..."
+  npx --yes "$GATEWAY_PACKAGE" --help >/dev/null
 else
   echo "==> WARNING: npm/npx not found. Ymir needs it at runtime to start copilot-api."
   echo "    Install Node.js (e.g. 'brew install node'), then re-run this script."

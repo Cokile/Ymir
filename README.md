@@ -4,7 +4,7 @@ Ymir is a small native macOS menu-bar app for controlling a local `copilot-api` 
 
 ## Features
 
-- Start and stop `npx @jeffreycao/copilot-api@latest start`
+- Start and stop a pinned, tested release of `@jeffreycao/copilot-api`
 - Sign in to `copilot-api` (runs `auth login --provider copilot` in a Terminal window)
 - Show the signed-in GitHub username in the sign-in entry
 - Sign out of Copilot after confirmation, stopping the gateway and removing only its saved Copilot token (settings and other providers' credentials are kept)
@@ -65,11 +65,11 @@ ad-hoc ("Sign to Run Locally"); pick a Team under Signing & Capabilities, or set
 - Xcode 15+ (or the Swift toolchain / command line tools)
 - [XcodeGen](https://github.com/yonaskolb/XcodeGen) to regenerate the project (`brew install xcodegen`)
 - `npx` available from `/opt/homebrew/bin`, `/usr/local/bin`, or `/usr/bin`
-- Node.js 22.15+ (or 23.5+) for the gateway compatibility module
+- Node.js matching the pinned gateway's requirements: 22.23.4+, 24.22.1+, or 26.12.1+ on those supported release lines
 - `copilot-api` auth completed once — use the app's **Sign In to copilot-api** menu item, or run:
 
 ```sh
-npx @jeffreycao/copilot-api@latest auth login --provider copilot
+npx --yes "@jeffreycao/copilot-api@$(cat Sources/Ymir/Resources/copilot-api-version.txt)" auth login --provider copilot
 ```
 
 To sign out, choose **Sign Out of Copilot…** in Ymir's menu. This clears the
@@ -84,6 +84,56 @@ available and retries the lookup later.
 Run the local authentication and menu-bar state tests with `swift test`.
 
 ## Notes
+
+### Codex desktop
+
+Merge these settings into `~/.codex/config.toml`, keeping your chosen model,
+context limits, and other features:
+
+```toml
+[model_providers.copilot_api]
+name = "OpenAI"
+base_url = "http://localhost:4141"
+model_catalog_url = "http://localhost:4141/models"
+experimental_bearer_token = "dummy"
+requires_openai_auth = false
+supports_websockets = false
+wire_api = "responses"
+request_max_retries = 3
+stream_max_retries = 3
+stream_idle_timeout_ms = 300000
+
+[features]
+defer_mailbox_preemption = true
+```
+
+The public `dummy` placeholder lets Codex load the gateway's model catalog when
+gateway client authentication is disabled on localhost. It needs no environment
+variable and survives logout. If gateway API keys are enabled, replace
+`experimental_bearer_token` with `env_key` pointing to an environment variable
+containing a gateway key. The catalog can include upstream fallback entries;
+`/v1/models` without a Codex User-Agent shows the gateway's discovered models.
+
+Fully quit and reopen Codex after changing provider settings. Current Codex no
+longer supports the old `remote_compaction_v2` feature flag; remove it from older
+configurations. `defer_mailbox_preemption` is recommended by the gateway for
+Copilot Multi-Agent V2 sessions.
+
+### Gateway upgrades
+
+[`Sources/Ymir/Resources/copilot-api-version.txt`](Sources/Ymir/Resources/copilot-api-version.txt)
+is the single version pin used by startup, sign-in, and setup. Ymir logs the
+package version when starting the gateway. Restarts do not select a newer npm
+release automatically.
+
+Run `make check-gateway` to download the pinned release without installing it,
+check both compatibility adapters against its real server bundle, and verify
+the adapted JavaScript parses. To evaluate an upgrade, run
+`node scripts/check_gateway.mjs <exact-version>` first. Then update the version
+file, run `node --test Tests/*.test.mjs` and `swift test`, and build/install with
+`make release`. Include the real-Codex regression below when upgrading Codex or
+the gateway. The bundle check verifies adapter boundaries and syntax, not live
+upstream model behavior.
 
 ### Raycast AI
 
@@ -128,11 +178,18 @@ and WebSocket upstream transport, and does not edit the npm cache. The loader
 checks the handler shape and reports an error if a future proxy release changes
 it, rather than applying an unverified rewrite.
 
-Codex 0.155.0-alpha.9.2 also resets this capability before its check at the start
-of a new user turn. That check runs before any gateway response, so it can still
-compact early even with this fix. Removing that remaining behavior requires a
-Codex client change; Ymir's adapter fixes the accounting during a running turn.
+The separate early-compaction behavior seen in older Codex builds did not
+reproduce with 0.167.0-alpha.3.2. Ymir preserves encrypted reasoning unchanged
+and does not maintain a separate reasoning store.
 
 Run the compatibility tests with `node --test Tests/codex-usage-compat.test.mjs`.
+Run all adapter tests with `node --test Tests/*.test.mjs`. An optional regression
+uses a real Codex binary and a synthetic local model endpoint, with no model API
+calls. It checks that reasoning round-trips unchanged, compaction does not happen
+prematurely below the threshold, and normal compaction still happens above it:
+
+```sh
+YMIR_CODEX_TEST_BINARY=/path/to/codex node --test Tests/codex-compaction.integration.test.mjs
+```
 
 Ymir is a normal local native app bundle, not Electron. If your company profile blocks all unsigned or ad-hoc signed apps, build and run from Xcode or sign with an Apple Developer certificate trusted by your device management policy.

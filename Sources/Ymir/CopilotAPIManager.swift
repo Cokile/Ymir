@@ -150,12 +150,8 @@ final class CopilotAPIManager {
 
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        proc.arguments = ["npx", "@jeffreycao/copilot-api@latest", "start"]
-        #if SWIFT_PACKAGE
-        let resourceBundle = Bundle.module
-        #else
-        let resourceBundle = Bundle.main
-        #endif
+        let package = try gatewayPackage()
+        proc.arguments = ["npx", "--yes", package, "start"]
         guard let compatibilityModule = resourceBundle.url(forResource: "codex-usage-compat", withExtension: "mjs") else {
             throw NSError(domain: "Ymir", code: 1, userInfo: [
                 NSLocalizedDescriptionKey: "The gateway compatibility module is missing. Reinstall Ymir."
@@ -172,6 +168,7 @@ final class CopilotAPIManager {
         FileManager.default.createFile(atPath: logURL.path, contents: nil)
         let logHandle = try FileHandle(forWritingTo: logURL)
         logHandle.seekToEndOfFile()
+        try logHandle.write(contentsOf: Data("Ymir: launching \(package)\n".utf8))
         proc.standardOutput = logHandle
         proc.standardError = logHandle
         proc.terminationHandler = { _ in
@@ -183,6 +180,7 @@ final class CopilotAPIManager {
     }
 
     func authLogin() throws {
+        let package = try gatewayPackage()
         // `auth login` is interactive (device-code flow), so run it in a
         // visible Terminal window instead of headlessly to a log file.
         let script = """
@@ -190,7 +188,7 @@ final class CopilotAPIManager {
         export PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin:$PATH"
         echo "Ymir: signing in to gateway…"
         echo
-        npx @jeffreycao/copilot-api@latest auth login --provider copilot
+        npx --yes \(package) auth login --provider copilot
         code=$?
         echo
         if [ $code -eq 0 ]; then
@@ -204,6 +202,30 @@ final class CopilotAPIManager {
         try script.write(to: url, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path)
         NSWorkspace.shared.open(url)
+    }
+
+    private var resourceBundle: Bundle {
+        #if SWIFT_PACKAGE
+        return .module
+        #else
+        return .main
+        #endif
+    }
+
+    private func gatewayPackage() throws -> String {
+        guard let url = resourceBundle.url(forResource: "copilot-api-version", withExtension: "txt"),
+              let contents = try? String(contentsOf: url, encoding: .utf8) else {
+            throw NSError(domain: "Ymir", code: 2, userInfo: [
+                NSLocalizedDescriptionKey: "The gateway version is missing. Reinstall Ymir."
+            ])
+        }
+        let version = contents.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard version.range(of: #"^[0-9]+\.[0-9]+\.[0-9]+$"#, options: .regularExpression) != nil else {
+            throw NSError(domain: "Ymir", code: 2, userInfo: [
+                NSLocalizedDescriptionKey: "The gateway version is invalid. Reinstall Ymir."
+            ])
+        }
+        return "@jeffreycao/copilot-api@\(version)"
     }
 
     func authLogout() throws {
