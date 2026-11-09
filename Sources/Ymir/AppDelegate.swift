@@ -8,6 +8,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
     private lazy var statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private let menu = NSMenu()
     private let manager = CopilotAPIManager()
+    private let codexCatalog = CodexModelCatalog()
     private let account = CopilotAccount()
     private var statusIcon: GatewayStatusIcon?
     private var statusRefreshID = UUID()
@@ -245,6 +246,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
                     self.notify(title: "Ymir", body: message)
                 }
                 self.updateGatewayState()
+                self.codexCatalog.refreshIfNeeded(isRunning: self.manager.state == .running)
             }
         }
     }

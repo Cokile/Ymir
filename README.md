@@ -87,14 +87,19 @@ Run the local authentication and menu-bar state tests with `swift test`.
 
 ### Codex desktop
 
-Merge these settings into `~/.codex/config.toml`, keeping your chosen model,
-context limits, and other features:
+Start Ymir's gateway once so it creates
+`~/Library/Application Support/Ymir/codex-models.json`. Merge these settings into
+`~/.codex/config.toml`, replacing `YOUR_USER` with your macOS username and keeping
+your chosen model, context limits, and other features. Set `model_catalog_json`
+at the top level, before any table headers, and remove an existing
+`model_catalog_url` from the provider:
 
 ```toml
+model_catalog_json = "/Users/YOUR_USER/Library/Application Support/Ymir/codex-models.json"
+
 [model_providers.copilot_api]
 name = "OpenAI"
 base_url = "http://localhost:4141"
-model_catalog_url = "http://localhost:4141/models"
 experimental_bearer_token = "dummy"
 requires_openai_auth = false
 supports_websockets = false
@@ -107,12 +112,16 @@ stream_idle_timeout_ms = 300000
 defer_mailbox_preemption = true
 ```
 
-The public `dummy` placeholder lets Codex load the gateway's model catalog when
-gateway client authentication is disabled on localhost. It needs no environment
-variable and survives logout. If gateway API keys are enabled, replace
-`experimental_bearer_token` with `env_key` pointing to an environment variable
-containing a gateway key. The catalog can include upstream fallback entries;
-`/v1/models` without a Codex User-Agent shows the gateway's discovered models.
+Ymir refreshes the local catalog when the gateway starts and every five minutes
+while it is healthy. It validates the response and replaces the file atomically;
+a failed request or an empty catalog leaves the last good copy available. Codex
+can therefore load its model picker even when catalog discovery is unavailable
+at startup. Model inference still uses the running gateway.
+
+This setup assumes gateway client authentication is disabled on localhost. The
+public `dummy` placeholder is not a Copilot credential. The catalog can include
+upstream fallback entries; `/v1/models` without a Codex User-Agent shows the
+gateway's discovered models.
 
 Fully quit and reopen Codex after changing provider settings. Current Codex no
 longer supports the old `remote_compaction_v2` feature flag; remove it from older
@@ -127,7 +136,7 @@ package version when starting the gateway. Restarts do not select a newer npm
 release automatically.
 
 Run `make check-gateway` to download the pinned release without installing it,
-check both compatibility adapters against its real server bundle, and verify
+check the compatibility adapters against its real server bundle, and verify
 the adapted JavaScript parses. To evaluate an upgrade, run
 `node scripts/check_gateway.mjs <exact-version>` first. Then update the version
 file, run `node --test Tests/*.test.mjs` and `swift test`, and build/install with
@@ -177,7 +186,8 @@ provider aliases, instructions, and compaction settings are preserved.
 
 With a 1M context setting, Codex reports 950,000 usable tokens after its 5%
 headroom. A configured 800,000-token auto-compaction threshold remains unchanged.
-Restart Codex after installing the correction to refresh its loaded catalog.
+Ymir saves these corrected limits in its local catalog. Restart Codex after
+installing the correction to refresh its loaded metadata.
 
 ### Codex usage accounting
 
@@ -201,7 +211,8 @@ uses a real Codex binary and a synthetic local model endpoint, with no model API
 calls. It checks that reasoning round-trips unchanged, compaction does not happen
 prematurely below the threshold, normal compaction still happens above it, and
 the corrected catalog gives a 950k usable window with either its default or an
-explicit 1M setting:
+explicit 1M setting. It also checks model discovery and the context window using
+a local catalog while the catalog endpoint is unavailable:
 
 ```sh
 YMIR_CODEX_TEST_BINARY=/path/to/codex node --test Tests/codex-compaction.integration.test.mjs

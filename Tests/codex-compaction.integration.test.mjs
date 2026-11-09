@@ -4,7 +4,7 @@ import test from 'node:test';
 import http from 'node:http';
 import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { adaptCopilotResponses } from '../Sources/Ymir/Resources/codex-usage-compat.mjs';
@@ -32,10 +32,11 @@ const astraCatalog = { models: [{
   supports_parallel_tool_calls: true, experimental_supported_tools: [], input_modalities: ['text'],
 }] };
 
-async function runCase(threshold, { catalog, contextWindow = 70000, turns = 3 } = {}) {
+async function runCase(threshold, { catalog, contextWindow = 70000, turns = 3, localCatalog = false } = {}) {
   const directory = mkdtempSync(join(tmpdir(), 'ymir-codex-regression-'));
   const original = 'A'.repeat(160000);
   let requests = 0;
+  let catalogRequests = 0;
   const violations = [];
   const createResponses = async payload => {
     for (const item of payload.input ?? []) {
@@ -66,8 +67,9 @@ async function runCase(threshold, { catalog, contextWindow = 70000, turns = 3 } 
   const server = http.createServer(async (req, res) => {
     try {
       if (catalog && req.url.startsWith('/models')) {
-        res.writeHead(200, { 'content-type': 'application/json' });
-        res.end(JSON.stringify(catalog));
+        catalogRequests++;
+        res.writeHead(localCatalog ? 503 : 200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify(localCatalog ? { error: 'Catalog unavailable during startup' } : catalog));
         return;
       }
       const chunks = []; for await (const chunk of req) chunks.push(chunk);
@@ -83,11 +85,13 @@ async function runCase(threshold, { catalog, contextWindow = 70000, turns = 3 } 
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const toml = value => typeof value === 'object' && value !== null
     ? '{' + Object.entries(value).map(([key, v]) => JSON.stringify(key) + '=' + toml(v)).join(',') + '}' : JSON.stringify(value);
-  const config = { model: 'gpt-6-astra', model_provider: 'ymir_test', ...(contextWindow === null ? {} : { model_context_window: contextWindow }),
+  const catalogPath = join(directory, 'models.json');
+  if (localCatalog) writeFileSync(catalogPath, JSON.stringify(catalog));
+  const config = { ...(localCatalog ? { model_catalog_json: catalogPath } : {}), model: 'gpt-6-astra', model_provider: 'ymir_test', ...(contextWindow === null ? {} : { model_context_window: contextWindow }),
     model_auto_compact_token_limit: threshold,
     'model_providers.ymir_test': { name: 'Local test', base_url: `http://127.0.0.1:${server.address().port}`, wire_api: 'responses', requires_openai_auth: false, ...(catalog ? { model_catalog_url: `http://127.0.0.1:${server.address().port}/models`, experimental_bearer_token: 'dummy' } : {}) },
     mcp_servers: {}, 'features.apps': false, 'features.shell_tool': false, 'analytics.enabled': false };
-  const args = ['app-server', '--stdio', ...Object.entries(config).flatMap(([key, value]) => ['-c', key + '=' + toml(value)])];
+  const args = ['-c', 'features.code_mode_host=true', 'app-server', '--stdio', ...Object.entries(config).flatMap(([key, value]) => ['-c', key + '=' + toml(value)])];
   const child = spawn(binary, args, { stdio: ['pipe', 'pipe', 'ignore'], env: { ...process.env, CODEX_HOME: directory } });
   const events = [];
   let notify;
@@ -108,8 +112,13 @@ async function runCase(threshold, { catalog, contextWindow = 70000, turns = 3 } 
   };
   const send = (method, params, id) => child.stdin.write(JSON.stringify({ method, params, ...(id === undefined ? {} : { id }) }) + '\n');
   try {
-    send('initialize', { clientInfo: { name: 'ymir_compaction_test', version: '1' }, capabilities: { experimentalApi: true } }, 1);
+    send('initialize', { clientInfo: { name: 'Codex Desktop', version: '26.1103.41825' }, capabilities: { experimentalApi: true, explicitGatewayOauth: true } }, 1);
     await wait(e => e.id === 1); send('initialized', {});
+    if (catalog) {
+      send('model/list', { includeHidden: false }, 100);
+      const available = (await wait(e => e.id === 100)).result.data;
+      assert(available.some(model => model.model === 'gpt-6-astra'), 'The desktop model picker must include Astra.');
+    }
     send('thread/start', { ephemeral: true, model: 'gpt-6-astra', modelProvider: 'ymir_test', cwd: directory,
       approvalPolicy: 'never', sandbox: 'read-only', baseInstructions: 'Reply with OK.', developerInstructions: '', environments: [], selectedCapabilityRoots: [] }, 2);
     const threadId = (await wait(e => e.id === 2)).result.thread.id;
@@ -121,6 +130,7 @@ async function runCase(threshold, { catalog, contextWindow = 70000, turns = 3 } 
       turnIDs.push(event.params.turn.id);
     }
     assert.deepEqual(violations, []);
+    if (localCatalog) assert.equal(catalogRequests, 0, 'Local model discovery must not depend on the catalog endpoint.');
     const compactionTurns = events.filter(e => e.method === 'item/started' && e.params.item.type === 'contextCompaction')
       .map(e => turnIDs.indexOf(e.params.turnId) + 1);
     const contextWindows = events.filter(e => e.method === 'thread/tokenUsage/updated')
@@ -141,11 +151,11 @@ test('real Codex: compacts normally above the threshold', { skip: !binary, timeo
   assert.deepEqual(await runCase(30000), { compactionTurns: [2, 3], requests: 5 });
 });
 
-for (const contextWindow of [null, 1000000]) {
-  test(`real Codex: uses a 950k window with ${contextWindow === null ? 'catalog defaults' : 'an explicit 1M limit'}`, { skip: !binary, timeout: 90000 }, async () => {
+for (const localCatalog of [false, true]) for (const contextWindow of [null, 1000000]) {
+  test(`real Codex: ${localCatalog ? 'offline local catalog' : 'remote catalog'} uses a 950k window with ${contextWindow === null ? 'catalog defaults' : 'an explicit 1M limit'}`, { skip: !binary, timeout: 90000 }, async () => {
     const candidates = [{ slug: 'gpt-6-astra', catalogSlug: 'gpt-6-astra', contextWindow: 1050000 }];
     const catalog = { ...astraCatalog, models: reconcileCopilotContext(astraCatalog.models, candidates, {}) };
-    const result = await runCase(800000, { catalog, contextWindow, turns: 1 });
+    const result = await runCase(800000, { catalog, contextWindow, turns: 1, localCatalog });
     assert.deepEqual(result, { compactionTurns: [], requests: 1, contextWindows: [950000] });
   });
 }
