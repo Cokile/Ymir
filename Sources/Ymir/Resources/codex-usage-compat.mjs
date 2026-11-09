@@ -5,6 +5,23 @@ const nativeResponsesCall = 'const response = await responsesHandlerDependencies
 const raycastMarker = '// Ymir: Raycast Chat Completions compatibility route.';
 const chatRoute = 'server.route("/v1/chat/completions", completionRoutes);';
 
+const catalogMarker = '// Ymir: Use native Copilot Astra context limits.';
+const catalogReturn = `return createCodexCatalogResponse(c, {
+		...upstreamCatalog ?? {},
+		models
+	}, explicitSlugs, template.model_messages ?? FALLBACK_CODEX_MODELS[0].model_messages);`;
+
+export function adaptCodexCatalog(source) {
+  if (source.includes(catalogMarker)) return source;
+  if (source.split(catalogReturn).length !== 2) {
+    throw new Error('Ymir could not correct the Codex context window: the copilot-api model catalog changed.');
+  }
+  const adapterURL = new URL('./codex-catalog-compat.mjs', import.meta.url).href;
+  const replacement = catalogReturn.replace('\n\t\tmodels\n', '\n\t\tmodels: ymirCopilotContext(models, visibleCandidates, modelMappings)\n');
+  return `import { reconcileCopilotContext as ymirCopilotContext } from ${JSON.stringify(adapterURL)};\n`
+    + source.replace(catalogReturn, `${catalogMarker}\n\t${replacement}`);
+}
+
 export function adaptRaycastRoutes(source) {
   if (source.includes(raycastMarker)) return source;
   if (source.split(chatRoute).length !== 2) {
@@ -44,6 +61,6 @@ registerHooks({
     const source = typeof result.source === 'string'
       ? result.source
       : new TextDecoder().decode(result.source);
-    return { ...result, source: adaptRaycastRoutes(adaptCopilotResponses(source)) };
+    return { ...result, source: adaptRaycastRoutes(adaptCodexCatalog(adaptCopilotResponses(source))) };
   },
 });

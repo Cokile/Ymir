@@ -166,6 +166,19 @@ boundary and fails explicitly if a future gateway version changes it.
 
 Run all compatibility tests with `node --test Tests/*.test.mjs`.
 
+### Codex context window
+
+The gateway's bundled Codex catalog advertises Astra with a 272,000-token
+context window and an 872,000-token maximum, even when native Copilot advertises
+1,050,000 tokens. Codex applies those catalog limits when fetching model metadata.
+Ymir corrects the native Copilot Astra entry to use a 1,000,000-token default
+(bounded by Copilot's live limit) and the live limit as its maximum. Other models,
+provider aliases, instructions, and compaction settings are preserved.
+
+With a 1M context setting, Codex reports 950,000 usable tokens after its 5%
+headroom. A configured 800,000-token auto-compaction threshold remains unchanged.
+Restart Codex after installing the correction to refresh its loaded catalog.
+
 ### Codex usage accounting
 
 Ymir preloads a small compatibility module when launching the gateway. Copilot's
@@ -186,7 +199,9 @@ Run the compatibility tests with `node --test Tests/codex-usage-compat.test.mjs`
 Run all adapter tests with `node --test Tests/*.test.mjs`. An optional regression
 uses a real Codex binary and a synthetic local model endpoint, with no model API
 calls. It checks that reasoning round-trips unchanged, compaction does not happen
-prematurely below the threshold, and normal compaction still happens above it:
+prematurely below the threshold, normal compaction still happens above it, and
+the corrected catalog gives a 950k usable window with either its default or an
+explicit 1M setting:
 
 ```sh
 YMIR_CODEX_TEST_BINARY=/path/to/codex node --test Tests/codex-compaction.integration.test.mjs

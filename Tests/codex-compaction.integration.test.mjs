@@ -8,6 +8,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { adaptCopilotResponses } from '../Sources/Ymir/Resources/codex-usage-compat.mjs';
+import { reconcileCopilotContext } from '../Sources/Ymir/Resources/codex-catalog-compat.mjs';
 
 const binary = process.env.YMIR_CODEX_TEST_BINARY;
 const handler = `const handleResponses = async (c) => {
@@ -18,7 +19,20 @@ const handler = `const handleResponses = async (c) => {
   return response;
 };`;
 
-async function runCase(threshold) {
+// The bundled gateway catalog currently has smaller Codex-provider limits than
+// native Copilot Astra. Keep this stale entry as the regression input.
+const astraCatalog = { models: [{
+  slug: 'gpt-6-astra', display_name: 'GPT-6-Astra', description: 'Test model',
+  default_reasoning_level: 'low', supported_reasoning_levels: [{ effort: 'low', description: 'Low' }],
+  shell_type: 'shell_command', visibility: 'list', supported_in_api: true, priority: 1,
+  context_window: 272000, max_context_window: 872000, auto_compact_token_limit: null,
+  model_messages: { instructions_template: 'Reply with OK.', instructions_variables: {} },
+  supports_reasoning_summaries: true, support_verbosity: true, default_verbosity: 'low',
+  apply_patch_tool_type: 'freeform', truncation_policy: { mode: 'tokens', limit: 10000 },
+  supports_parallel_tool_calls: true, experimental_supported_tools: [], input_modalities: ['text'],
+}] };
+
+async function runCase(threshold, { catalog, contextWindow = 70000, turns = 3 } = {}) {
   const directory = mkdtempSync(join(tmpdir(), 'ymir-codex-regression-'));
   const original = 'A'.repeat(160000);
   let requests = 0;
@@ -51,6 +65,11 @@ async function runCase(threshold) {
     `${source}; return handleResponses;`)({ createResponses });
   const server = http.createServer(async (req, res) => {
     try {
+      if (catalog && req.url.startsWith('/models')) {
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify(catalog));
+        return;
+      }
       const chunks = []; for await (const chunk of req) chunks.push(chunk);
       const c = { req: { json: async () => JSON.parse(Buffer.concat(chunks)), header: key => req.headers[key] },
         header: (key, value) => res.setHeader(key, value), json: (body, status) => ({ body, status }) };
@@ -64,12 +83,12 @@ async function runCase(threshold) {
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const toml = value => typeof value === 'object' && value !== null
     ? '{' + Object.entries(value).map(([key, v]) => JSON.stringify(key) + '=' + toml(v)).join(',') + '}' : JSON.stringify(value);
-  const config = { model: 'gpt-6-astra', model_provider: 'ymir_test', model_context_window: 70000,
+  const config = { model: 'gpt-6-astra', model_provider: 'ymir_test', ...(contextWindow === null ? {} : { model_context_window: contextWindow }),
     model_auto_compact_token_limit: threshold,
-    'model_providers.ymir_test': { name: 'Local test', base_url: `http://127.0.0.1:${server.address().port}`, wire_api: 'responses', requires_openai_auth: false },
+    'model_providers.ymir_test': { name: 'Local test', base_url: `http://127.0.0.1:${server.address().port}`, wire_api: 'responses', requires_openai_auth: false, ...(catalog ? { model_catalog_url: `http://127.0.0.1:${server.address().port}/models`, experimental_bearer_token: 'dummy' } : {}) },
     mcp_servers: {}, 'features.apps': false, 'features.shell_tool': false, 'analytics.enabled': false };
   const args = ['app-server', '--stdio', ...Object.entries(config).flatMap(([key, value]) => ['-c', key + '=' + toml(value)])];
-  const child = spawn(binary, args, { stdio: ['pipe', 'pipe', 'ignore'] });
+  const child = spawn(binary, args, { stdio: ['pipe', 'pipe', 'ignore'], env: { ...process.env, CODEX_HOME: directory } });
   const events = [];
   let notify;
   const lines = createInterface({ input: child.stdout });
@@ -95,7 +114,7 @@ async function runCase(threshold) {
       approvalPolicy: 'never', sandbox: 'read-only', baseInstructions: 'Reply with OK.', developerInstructions: '', environments: [], selectedCapabilityRoots: [] }, 2);
     const threadId = (await wait(e => e.id === 2)).result.thread.id;
     const turnIDs = [];
-    for (let i = 0; i < 3; i++) {
+    for (let i = 0; i < turns; i++) {
       send('turn/start', { threadId, input: [{ type: 'text', text: 'Continue.' }] }, 3 + i);
       const event = await wait(e => e.method === 'turn/completed');
       assert.equal(event.params.turn.status, 'completed');
@@ -104,7 +123,9 @@ async function runCase(threshold) {
     assert.deepEqual(violations, []);
     const compactionTurns = events.filter(e => e.method === 'item/started' && e.params.item.type === 'contextCompaction')
       .map(e => turnIDs.indexOf(e.params.turnId) + 1);
-    return { compactionTurns, requests };
+    const contextWindows = events.filter(e => e.method === 'thread/tokenUsage/updated')
+      .map(e => e.params.tokenUsage.modelContextWindow);
+    return { compactionTurns, requests, ...(catalog ? { contextWindows } : {}) };
   } finally {
     child.kill(); lines.close();
     server.closeAllConnections(); await new Promise(resolve => server.close(resolve));
@@ -119,3 +140,12 @@ test('real Codex: preserves reasoning without premature compaction below the thr
 test('real Codex: compacts normally above the threshold', { skip: !binary, timeout: 90000 }, async () => {
   assert.deepEqual(await runCase(30000), { compactionTurns: [2, 3], requests: 5 });
 });
+
+for (const contextWindow of [null, 1000000]) {
+  test(`real Codex: uses a 950k window with ${contextWindow === null ? 'catalog defaults' : 'an explicit 1M limit'}`, { skip: !binary, timeout: 90000 }, async () => {
+    const candidates = [{ slug: 'gpt-6-astra', catalogSlug: 'gpt-6-astra', contextWindow: 1050000 }];
+    const catalog = { ...astraCatalog, models: reconcileCopilotContext(astraCatalog.models, candidates, {}) };
+    const result = await runCase(800000, { catalog, contextWindow, turns: 1 });
+    assert.deepEqual(result, { compactionTurns: [], requests: 1, contextWindows: [950000] });
+  });
+}
