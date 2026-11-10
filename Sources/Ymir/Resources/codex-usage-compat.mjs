@@ -1,4 +1,7 @@
 import { registerHooks } from 'node:module';
+import { adaptCopilotRequestRetry } from './copilot-request-retry.mjs';
+
+export { adaptCopilotRequestRetry };
 
 const marker = '// Ymir: Copilot Astra usage already includes retained reasoning.';
 const nativeResponsesCall = 'const response = await responsesHandlerDependencies.createResponses(payload, {';
@@ -61,6 +64,6 @@ registerHooks({
     const source = typeof result.source === 'string'
       ? result.source
       : new TextDecoder().decode(result.source);
-    return { ...result, source: adaptRaycastRoutes(adaptCodexCatalog(adaptCopilotResponses(source))) };
+    return { ...result, source: adaptCopilotRequestRetry(adaptRaycastRoutes(adaptCodexCatalog(adaptCopilotResponses(source)))) };
   },
 });

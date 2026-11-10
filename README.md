@@ -175,6 +175,60 @@ boundary and fails explicitly if a future gateway version changes it.
 
 Run all compatibility tests with `node --test Tests/*.test.mjs`.
 
+### Copilot request-body timeouts
+
+Copilot can reject a Responses upload with HTTP 408 and the error code
+`user_request_timeout` ("Timed out reading request body"). Ymir retries that
+specific upstream rejection twice, waiting 500 ms and then 1 second. It preserves
+the full request, reasoning, and request/session IDs, and honors cancellation
+during backoff. Each attempt keeps the gateway's existing transport timeouts.
+
+Recovery applies to native Copilot HTTP Responses, including requests that will
+stream once accepted. It does not replay network errors, other HTTP errors, or
+an already accepted response stream. If all three attempts time out, the final
+upstream status, error body, and request ID reach the client unchanged. Persistent
+upload problems can therefore still produce a 408; increasing Codex's stream
+idle timeout does not change Copilot's upload deadline.
+
+Run `node --test Tests/copilot-request-retry.test.mjs` for the regression tests;
+`make check-gateway` also runs them against the pinned gateway's real transport.
+
+### Request diagnostics
+
+Ymir writes structured lines prefixed with `Ymir request:` to
+`~/Library/Logs/Ymir/copilot-api.log` for each native Copilot HTTP Responses
+request. They include:
+
+- UTC timestamp, a unique diagnostic ID shared by all retries, and the gateway trace ID
+- Model, streaming flag, exact serialized request size in UTF-8 bytes, input/tool/image counts, and encrypted reasoning size
+- Upstream hostname, outgoing request/interaction IDs, and returned `x-request-id` / `x-oai-request-id`
+- Attempt number, HTTP status, time to response headers, configured timeouts, retry delay, and total elapsed time through acceptance or rejection
+- Cancellation or transport failure, with error names and codes such as `ETIMEDOUT`
+
+The new entries contain metadata only: no prompts, instructions, tool arguments
+or outputs, reasoning content, credentials, full headers, or URL query strings.
+Ymir does not enable the gateway's verbose payload logging. Logging failures do
+not interrupt inference.
+
+`headers_ms` includes the upload and waiting for upstream response headers; it
+is not a measurement of upload speed or proof that Copilot received every byte.
+`request_accepted` means successful response headers arrived, not that streaming
+or inference completed. These diagnostics cover native Copilot HTTP Responses;
+other providers and WebSocket transport retain their existing gateway logging.
+
+To inspect recent entries or locate an error by its request ID:
+
+```sh
+rg 'Ymir request:' ~/Library/Logs/Ymir/copilot-api.log | tail -40
+rg -F 'REQUEST_ID' ~/Library/Logs/Ymir/copilot-api.log*
+```
+
+Use the matching entry's `diagnostic_id` to find the full retry sequence. Gateway
+restarts append a timestamped startup marker and preserve existing entries.
+At startup, a log of 10 MiB or more is rotated to `copilot-api.log.1`, keeping
+three previous files (`.1` through `.3`). The active file can grow beyond 10 MiB
+until the next gateway start. New log files are readable only by their owner.
+
 ### Codex context window
 
 The gateway's bundled Codex catalog advertises Astra with a 272,000-token

@@ -165,10 +165,9 @@ final class CopilotAPIManager {
         proc.environment = gatewayEnvironment
 
         let logURL = logFileURL()
-        FileManager.default.createFile(atPath: logURL.path, contents: nil)
-        let logHandle = try FileHandle(forWritingTo: logURL)
-        logHandle.seekToEndOfFile()
-        try logHandle.write(contentsOf: Data("Ymir: launching \(package)\n".utf8))
+        let logHandle = try GatewayLog.open(at: logURL)
+        let timestamp = ISO8601DateFormatter().string(from: Date())
+        try logHandle.write(contentsOf: Data("\nYmir: [\(timestamp)] launching \(package)\n".utf8))
         proc.standardOutput = logHandle
         proc.standardError = logHandle
         proc.terminationHandler = { _ in
